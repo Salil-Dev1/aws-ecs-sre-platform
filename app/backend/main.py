@@ -1,4 +1,4 @@
-﻿"""TaskFlow API prototype; the next commit adds production readiness."""
+"""TaskFlow API."""
 
 import json
 import logging
@@ -9,10 +9,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
+from bson import ObjectId
+from bson.errors import InvalidId
+from pymongo.errors import PyMongoError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("taskflow")
@@ -26,16 +29,31 @@ class ItemInput(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Prototype flaw: silently defaults to localhost with no PyMongo timeouts.
-    app.state.client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))
-    app.state.items = app.state.client.taskflow.items
-    yield
-    app.state.client.close()
+def create_app(client=None) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        owned_client = client is None
+        if owned_client:
+            mongo_uri = os.getenv("MONGO_URI")
+            if not mongo_uri:
+                raise RuntimeError("MONGO_URI is required; set it to a reachable MongoDB connection string.")
+            try:
+                application.state.client = MongoClient(
+                    mongo_uri,
+                    serverSelectionTimeoutMS=2000,
+                    connectTimeoutMS=2000,
+                )
+            except (PyMongoError, ValueError) as exc:
+                raise RuntimeError("MONGO_URI is not a valid MongoDB connection string.") from exc
+        else:
+            application.state.client = client
+        application.state.items = application.state.client.taskflow.items
+        try:
+            yield
+        finally:
+            if owned_client:
+                application.state.client.close()
 
-
-def create_app() -> FastAPI:
     application = FastAPI(title="TaskFlow API", lifespan=lifespan)
 
     @application.middleware("http")
@@ -53,13 +71,24 @@ def create_app() -> FastAPI:
             route = getattr(request.scope.get("route"), "path", request.url.path)
             REQUESTS.labels(request.method, route, str(status)).inc()
             LATENCY.labels(request.method, route).observe(duration)
-            logger.info(json.dumps({"timestamp": datetime.now(timezone.utc).isoformat(), "level": "INFO", "request_id": request_id, "method": request.method, "path": request.url.path, "status": status, "duration_ms": round(duration * 1000, 1)}))
+            logger.info(json.dumps({
+                "timestamp": datetime.now(timezone.utc).isoformat(), "level": "INFO",
+                "request_id": request_id, "method": request.method, "path": request.url.path,
+                "status": status, "duration_ms": round(duration * 1000, 1),
+            }))
 
     @application.get("/health")
     def health(request: Request):
-        request.app.state.client.admin.command("ping")
-        DB_HEALTH.set(1)
-        return {"status": "ok", "db": "connected"}
+        try:
+            request.app.state.client.admin.command("ping")
+            DB_HEALTH.set(1)
+            return {"status": "ok", "db": "connected"}
+        except PyMongoError as exc:
+            DB_HEALTH.set(0)
+            return JSONResponse(
+                status_code=503,
+                content={"status": "degraded", "db": "unreachable"},
+            )
 
     @application.get("/metrics")
     def metrics():
@@ -67,17 +96,34 @@ def create_app() -> FastAPI:
 
     @application.get("/api/items")
     def list_items(request: Request):
-        return [{"id": str(item.pop("_id")), **item} for item in request.app.state.items.find()]
+        try:
+            items = [{"id": str(item["_id"]), "title": item["title"]} for item in request.app.state.items.find()]
+            DB_HEALTH.set(1)
+            return items
+        except PyMongoError as exc:
+            DB_HEALTH.set(0)
+            raise HTTPException(status_code=503, detail="Database is unavailable") from exc
 
     @application.post("/api/items", status_code=201)
     def create_item(payload: ItemInput, request: Request):
-        result = request.app.state.items.insert_one({"title": payload.title})
-        return {"id": str(result.inserted_id), "title": payload.title}
+        try:
+            result = request.app.state.items.insert_one({"title": payload.title})
+            DB_HEALTH.set(1)
+            return {"id": str(result.inserted_id), "title": payload.title}
+        except PyMongoError as exc:
+            DB_HEALTH.set(0)
+            raise HTTPException(status_code=503, detail="Database is unavailable") from exc
 
     @application.delete("/api/items/{item_id}")
     def delete_item(item_id: str, request: Request):
-        from bson import ObjectId
-        result = request.app.state.items.delete_one({"_id": ObjectId(item_id)})
+        try:
+            result = request.app.state.items.delete_one({"_id": ObjectId(item_id)})
+            DB_HEALTH.set(1)
+        except InvalidId as exc:
+            raise HTTPException(status_code=400, detail="Invalid item id") from exc
+        except PyMongoError as exc:
+            DB_HEALTH.set(0)
+            raise HTTPException(status_code=503, detail="Database is unavailable") from exc
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Item not found")
         return {"deleted": True}
