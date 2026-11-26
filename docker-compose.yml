@@ -1,3 +1,5 @@
+name: taskflow
+
 services:
   mongo:
     image: mongo:7
