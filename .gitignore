@@ -1,0 +1,9 @@
+.env*
+*.tfstate*
+.terraform/
+*.tfvars
+*.pem
+*.key
+__pycache__/
+node_modules/
+MASTER_PROMPT.md
