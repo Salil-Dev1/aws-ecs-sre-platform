@@ -14,7 +14,7 @@ def make_client():
     collection.insert_one.return_value.inserted_id = ObjectId("507f1f77bcf86cd799439012")
     collection.delete_one.return_value.deleted_count = 1
     client = Mock()
-    client.taskflow.items = collection
+    client.get_database.return_value.items = collection
     client.admin.command.return_value = {"ok": 1}
 
     application = create_app(client=client)
@@ -32,7 +32,8 @@ def test_health_reports_database_state():
 
 
 def test_items_crud_and_request_id():
-    http, _, collection = make_client()
+    http, client, collection = make_client()
+    client.get_database.assert_called_once_with("taskflowdb")
     listed = http.get("/api/items", headers={"X-Request-ID": "request-123"})
     assert listed.status_code == 200
     assert listed.headers["x-request-id"] == "request-123"

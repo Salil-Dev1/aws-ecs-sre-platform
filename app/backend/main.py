@@ -54,7 +54,8 @@ def create_app(client=None) -> FastAPI:
                 raise RuntimeError("MONGO_URI is not a valid MongoDB connection string.") from exc
         else:
             application.state.client = client
-        application.state.items = application.state.client.taskflow.items
+        database_name = os.getenv("MONGO_DB", "taskflowdb")
+        application.state.items = application.state.client.get_database(database_name).items
         try:
             yield
         finally:
