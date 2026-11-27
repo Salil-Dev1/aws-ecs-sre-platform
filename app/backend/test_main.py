@@ -1,9 +1,9 @@
 from unittest.mock import Mock
 
+import pytest
 from bson import ObjectId
 from fastapi.testclient import TestClient
 from pymongo.errors import ServerSelectionTimeoutError
-import pytest
 
 from main import create_app
 
@@ -67,6 +67,5 @@ def test_database_outage_returns_clean_503():
 
 def test_missing_mongo_uri_fails_startup_clearly(monkeypatch):
     monkeypatch.delenv("MONGO_URI", raising=False)
-    with pytest.raises(RuntimeError, match="MONGO_URI is required"):
-        with TestClient(create_app()):
-            pass
+    with pytest.raises(RuntimeError, match="MONGO_URI is required"), TestClient(create_app()):
+        pass

@@ -6,15 +6,22 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
-from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Gauge, Histogram, generate_latest
-from pydantic import BaseModel, Field
-from pymongo import MongoClient
 from bson import ObjectId
 from bson.errors import InvalidId
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
+from pydantic import BaseModel, Field
+from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 logging.basicConfig(level=logging.INFO)
@@ -72,7 +79,7 @@ def create_app(client=None) -> FastAPI:
             REQUESTS.labels(request.method, route, str(status)).inc()
             LATENCY.labels(request.method, route).observe(duration)
             logger.info(json.dumps({
-                "timestamp": datetime.now(timezone.utc).isoformat(), "level": "INFO",
+                "timestamp": datetime.now(UTC).isoformat(), "level": "INFO",
                 "request_id": request_id, "method": request.method, "path": request.url.path,
                 "status": status, "duration_ms": round(duration * 1000, 1),
             }))
@@ -83,7 +90,7 @@ def create_app(client=None) -> FastAPI:
             request.app.state.client.admin.command("ping")
             DB_HEALTH.set(1)
             return {"status": "ok", "db": "connected"}
-        except PyMongoError as exc:
+        except PyMongoError:
             DB_HEALTH.set(0)
             return JSONResponse(
                 status_code=503,
