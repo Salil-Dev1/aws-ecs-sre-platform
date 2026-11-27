@@ -31,9 +31,16 @@ def test_health_reports_database_state():
     client.admin.command.assert_called_once_with("ping")
 
 
-def test_items_crud_and_request_id():
-    http, client, collection = make_client()
+def test_default_database_is_taskflowdb():
+    client = Mock()
+    client.get_database.return_value.items = Mock()
+    with TestClient(create_app(client=client)):
+        pass
     client.get_database.assert_called_once_with("taskflowdb")
+
+
+def test_items_crud_and_request_id():
+    http, _, collection = make_client()
     listed = http.get("/api/items", headers={"X-Request-ID": "request-123"})
     assert listed.status_code == 200
     assert listed.headers["x-request-id"] == "request-123"
