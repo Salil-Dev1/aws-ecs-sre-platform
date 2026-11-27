@@ -68,9 +68,11 @@ data "aws_iam_policy_document" "github_assume_role" {
     }
 
     condition {
-      test     = "StringEquals"
+      # GitHub's immutable subject format adds owner and repository IDs.
+      # Match only this configured repository and the main branch.
+      test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:ref:refs/heads/main"]
+      values   = ["repo:${replace(var.github_repo, "/", "@*/")}@*:ref:refs/heads/main"]
     }
   }
 }
