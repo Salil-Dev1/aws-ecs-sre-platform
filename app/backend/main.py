@@ -104,7 +104,6 @@ def create_app(client=None) -> FastAPI:
 
     @application.get("/api/items")
     def list_items(request: Request):
-        raise HTTPException(status_code=500, detail="Simulated DB query regression in v2")
         try:
             items = [{"id": str(item["_id"]), "title": item["title"]} for item in request.app.state.items.find()]
             DB_HEALTH.set(1)
