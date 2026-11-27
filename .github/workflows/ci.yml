@@ -27,6 +27,7 @@ jobs:
         run: docker build -f app/backend/Dockerfile .
       - name: Build frontend image
         run: docker build -f app/frontend/Dockerfile .
+      - uses: hashicorp/setup-terraform@v3
       - name: Terraform format
         working-directory: terraform
         run: terraform fmt -check -recursive
